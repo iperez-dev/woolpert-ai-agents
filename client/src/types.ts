@@ -61,6 +61,7 @@ export interface AgentInput {
   docsUrl: string;
   featured: boolean;
   skillMarkdown: string;
+  skillZipBase64: string;
   skillSourceFileName: string;
 }
 

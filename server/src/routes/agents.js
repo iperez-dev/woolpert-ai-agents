@@ -2,7 +2,10 @@ import { Router } from "express";
 import { Agent } from "../models/Agent.js";
 import { AGENT_DEPARTMENTS, CATALOG_TYPES } from "../constants/agentCatalog.js";
 import { canManageAgents } from "../middleware/canManageAgents.js";
+import { extractSkillMarkdownFromSkillZip } from "../utils/extractSkillZip.js";
 import { validateClaudeSkillMarkdown } from "../utils/validateClaudeSkillMarkdown.js";
+
+const MAX_SKILL_ZIP_BYTES = 10 * 1024 * 1024;
 
 const router = Router();
 
@@ -39,6 +42,7 @@ function pickAgentPayload(body) {
     docsUrl: typeof body.docsUrl === "string" ? body.docsUrl.trim() : "",
     featured: Boolean(body.featured),
     skillMarkdown: typeof body.skillMarkdown === "string" ? body.skillMarkdown : "",
+    skillZipBase64: typeof body.skillZipBase64 === "string" ? body.skillZipBase64 : "",
     skillSourceFileName:
       typeof body.skillSourceFileName === "string" ? body.skillSourceFileName.trim() : "",
   };
@@ -58,7 +62,10 @@ function validateAgentPayload(payload) {
  * Resolves skill markdown storage + validation for Claude skills; clears for AI agents.
  */
 function finalizeSkillFields(picked, existing, isCreate) {
-  const { skillSourceFileName, ...payload } = picked;
+  const skillSourceFileName = picked.skillSourceFileName || "";
+  const skillZipBase64 =
+    typeof picked.skillZipBase64 === "string" ? picked.skillZipBase64.trim() : "";
+  const { skillSourceFileName: _omitName, skillZipBase64: _omitZip, ...payload } = picked;
 
   if (payload.catalogType === "ai_agent") {
     payload.skillMarkdown = "";
@@ -67,9 +74,47 @@ function finalizeSkillFields(picked, existing, isCreate) {
   }
 
   const incoming = picked.skillMarkdown;
-  const hasIncoming = typeof incoming === "string" && incoming.trim() !== "";
+  const hasIncomingMd = typeof incoming === "string" && incoming.trim() !== "";
+  const hasZip = skillZipBase64.length > 0;
+
   let md = "";
-  if (hasIncoming) {
+
+  if (hasZip && hasIncomingMd) {
+    return {
+      error: "Send either a plain SKILL.md or a .skill archive, not both.",
+    };
+  }
+
+  if (hasZip) {
+    if (skillSourceFileName && !skillSourceFileName.toLowerCase().endsWith(".skill")) {
+      return { error: "Skill archives must use a .skill file extension." };
+    }
+
+    let buffer;
+    try {
+      buffer = Buffer.from(skillZipBase64, "base64");
+    } catch {
+      return { error: "Invalid skill archive encoding." };
+    }
+
+    if (!buffer.length) {
+      return { error: "Empty skill archive." };
+    }
+
+    if (buffer.length > MAX_SKILL_ZIP_BYTES) {
+      return { error: `Skill archive must be at most ${MAX_SKILL_ZIP_BYTES / (1024 * 1024)}MB.` };
+    }
+
+    const extracted = extractSkillMarkdownFromSkillZip(buffer);
+    if (!extracted.ok) {
+      return { error: extracted.message };
+    }
+
+    md = extracted.markdown;
+  } else if (hasIncomingMd) {
+    if (skillSourceFileName && !skillSourceFileName.toLowerCase().endsWith(".md")) {
+      return { error: "Plain skill uploads must use a .md file extension." };
+    }
     md = incoming;
   } else if (existing?.skillMarkdown && String(existing.skillMarkdown).trim() !== "") {
     md = existing.skillMarkdown;
@@ -78,13 +123,9 @@ function finalizeSkillFields(picked, existing, isCreate) {
   if (!md.trim()) {
     return {
       error: isCreate
-        ? "Claude Skill requires a valid SKILL.md file with YAML frontmatter (name and description)."
-        : "Claude Skill requires a SKILL.md file. Upload one or keep the existing skill document.",
+        ? "Claude Skill requires a valid plain SKILL.md or a .skill ZIP containing <folder>/SKILL.md."
+        : "Claude Skill requires a skill file. Upload .md or .skill, or keep the existing skill document.",
     };
-  }
-
-  if (hasIncoming && skillSourceFileName && !skillSourceFileName.toLowerCase().endsWith(".md")) {
-    return { error: "Skill uploads must use a .md file extension." };
   }
 
   const validated = validateClaudeSkillMarkdown(md);

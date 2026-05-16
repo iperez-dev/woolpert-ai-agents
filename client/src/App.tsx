@@ -49,6 +49,24 @@ function agentMatchesSearch(agent: Agent, tokens: string[]): boolean {
   return getSearchableTagStrings(agent).some((tag) => tagMatchesAnyToken(tag, tokens));
 }
 
+/** Base64 body only (no data: prefix), for .skill ZIP uploads. */
+function fileToBase64Raw(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Unexpected read result."));
+        return;
+      }
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Read failed."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function resolveCatalogType(agent: Agent): AgentCatalogType {
   return agent.catalogType ?? "ai_agent";
 }
@@ -76,6 +94,7 @@ const emptyAgentForm: AgentInput = {
   docsUrl: "",
   featured: false,
   skillMarkdown: "",
+  skillZipBase64: "",
   skillSourceFileName: "",
 };
 
@@ -177,19 +196,32 @@ function App() {
     setSuccessMessage("");
   }
 
-  async function applySkillMarkdownFile(file: File) {
-    if (!file.name.toLowerCase().endsWith(".md")) {
-      setErrorMessage("Only .md Claude skill files are accepted.");
-      return;
-    }
+  async function applySkillUploadFile(file: File) {
+    const lower = file.name.toLowerCase();
     try {
-      const text = await file.text();
-      setAgentForm((prev) => ({
-        ...prev,
-        skillMarkdown: text,
-        skillSourceFileName: file.name,
-      }));
-      resetMessages();
+      if (lower.endsWith(".md")) {
+        const text = await file.text();
+        setAgentForm((prev) => ({
+          ...prev,
+          skillMarkdown: text,
+          skillZipBase64: "",
+          skillSourceFileName: file.name,
+        }));
+        resetMessages();
+        return;
+      }
+      if (lower.endsWith(".skill")) {
+        const b64 = await fileToBase64Raw(file);
+        setAgentForm((prev) => ({
+          ...prev,
+          skillMarkdown: "",
+          skillZipBase64: b64,
+          skillSourceFileName: file.name,
+        }));
+        resetMessages();
+        return;
+      }
+      setErrorMessage("Upload a plain .md skill file or a .skill ZIP archive.");
     } catch {
       setErrorMessage("Could not read the skill file.");
     }
@@ -213,6 +245,7 @@ function App() {
         docsUrl: full.docsUrl || "",
         featured: full.featured,
         skillMarkdown: full.skillMarkdown ?? "",
+        skillZipBase64: "",
         skillSourceFileName: "",
       });
     } catch (error) {
@@ -238,9 +271,15 @@ function App() {
     resetMessages();
 
     try {
-      if (agentForm.catalogType === "claude_skill" && !agentForm.skillMarkdown.trim()) {
-        setErrorMessage("Claude Skill catalog items require a SKILL.md file with valid YAML frontmatter.");
-        return;
+      if (agentForm.catalogType === "claude_skill") {
+        const hasSkillPayload =
+          agentForm.skillMarkdown.trim().length > 0 || agentForm.skillZipBase64.trim().length > 0;
+        if (!hasSkillPayload) {
+          setErrorMessage(
+            "Claude Skill catalog items require a plain .md file or a .skill ZIP with valid SKILL.md frontmatter."
+          );
+          return;
+        }
       }
 
       const authEmail = agentForm.ownerEmail.trim();
@@ -511,7 +550,7 @@ function App() {
                   ...prev,
                   catalogType: event.target.value as AgentCatalogType,
                   ...(event.target.value === "ai_agent"
-                    ? { skillMarkdown: "", skillSourceFileName: "" }
+                    ? { skillMarkdown: "", skillZipBase64: "", skillSourceFileName: "" }
                     : {}),
                 }))
               }
@@ -593,7 +632,7 @@ function App() {
 
           {agentForm.catalogType === "claude_skill" ? (
             <div className="skill-dropzone-wrap">
-              <span className="skill-dropzone-label">Claude skill file (.md)</span>
+              <span className="skill-dropzone-label">Claude skill (.md or .skill ZIP)</span>
               <div
                 className="skill-dropzone"
                 onDragOver={(event) => {
@@ -604,7 +643,7 @@ function App() {
                   event.preventDefault();
                   const file = event.dataTransfer.files[0];
                   if (file) {
-                    void applySkillMarkdownFile(file);
+                    void applySkillUploadFile(file);
                   }
                 }}
                 onClick={() => skillFileInputRef.current?.click()}
@@ -617,22 +656,22 @@ function App() {
                 role="button"
                 tabIndex={0}
               >
-                <p className="skill-dropzone__lead">Drop SKILL.md here or click to browse</p>
+                <p className="skill-dropzone__lead">Drop a plain SKILL.md or a .skill ZIP here, or click to browse</p>
                 <p className="skill-dropzone__hint">
-                  File must start with YAML frontmatter between --- lines and include name and description
-                  keys.
+                  Plain file: YAML frontmatter with name and description. Archive: must contain exactly one
+                  top-level folder with SKILL.md inside (e.g. MySkill/SKILL.md).
                 </p>
               </div>
               <input
                 ref={skillFileInputRef}
                 type="file"
-                accept=".md,text/markdown"
+                accept=".md,.skill,text/markdown,application/zip"
                 className="skill-dropzone__input"
-                aria-label="Choose Claude skill markdown file"
+                aria-label="Choose Claude skill file or archive"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) {
-                    void applySkillMarkdownFile(file);
+                    void applySkillUploadFile(file);
                   }
                   event.target.value = "";
                 }}
@@ -640,8 +679,8 @@ function App() {
               <p className="skill-dropzone__status">
                 {agentForm.skillSourceFileName
                   ? `Attached: ${agentForm.skillSourceFileName}`
-                  : agentForm.skillMarkdown.trim()
-                    ? "Saved skill file on server — drop or browse to replace."
+                  : agentForm.skillMarkdown.trim() || agentForm.skillZipBase64.trim()
+                    ? "Saved skill on server — drop or browse to replace."
                     : "No skill file selected yet."}
               </p>
             </div>
