@@ -235,9 +235,14 @@ a {
   color: #ddd;
 }
 
-.agent-card__tag--catalog {
+.agent-card__tag--catalog-ai {
   border-color: #f08a3e;
   color: #f08a3e;
+}
+
+.agent-card__tag--catalog-claude {
+  border-color: #3fb950;
+  color: #7ee787;
 }
 
 .agent-card__footer {

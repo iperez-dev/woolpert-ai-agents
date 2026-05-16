@@ -37,7 +37,7 @@ function getSearchableTagStrings(agent: Agent): string[] {
     kind === "ai_agent"
       ? ["AI Agents", "ai agents"]
       : kind === "claude_skill"
-        ? ["Claude Skills", "claude skills"]
+        ? ["Claude Skills", "claude skills", "Claude skill"]
         : [];
   return [...agent.tags, label, kind, slugSpaced, ...extras];
 }
@@ -69,6 +69,10 @@ function fileToBase64Raw(file: File): Promise<string> {
 
 function resolveCatalogType(agent: Agent): AgentCatalogType {
   return agent.catalogType ?? "ai_agent";
+}
+
+function catalogThumbnailTypeLabel(agent: Agent): string {
+  return resolveCatalogType(agent) === "claude_skill" ? "Claude skill" : "AI Agent";
 }
 
 /** Display date as M.D.YYYY (e.g. 5.16.2026) */
@@ -477,8 +481,14 @@ function App() {
                 <h3 className="agent-card__title">{agent.name.trim()}</h3>
                 <p className="agent-card__summary">{agent.summary}</p>
                 <div className="agent-card__tags" aria-label="Tags">
-                  <span className="agent-card__tag agent-card__tag--catalog">
-                    {CATALOG_TYPE_LABELS[resolveCatalogType(agent)]}
+                  <span
+                    className={
+                      resolveCatalogType(agent) === "claude_skill"
+                        ? "agent-card__tag agent-card__tag--catalog-claude"
+                        : "agent-card__tag agent-card__tag--catalog-ai"
+                    }
+                  >
+                    {catalogThumbnailTypeLabel(agent)}
                   </span>
                   {agent.tags.map((tag) => (
                     <span key={`${agent._id}-${tag}`} className="agent-card__tag">
