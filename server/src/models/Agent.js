@@ -52,6 +52,15 @@ const agentSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    skillMarkdown: {
+      type: String,
+      default: "",
+      maxlength: 524288,
+    },
+    skillFileUploaded: {
+      type: Boolean,
+      default: false,
+    },
     featured: {
       type: Boolean,
       default: false,

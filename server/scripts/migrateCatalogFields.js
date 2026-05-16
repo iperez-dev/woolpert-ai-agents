@@ -26,7 +26,15 @@ const typeResult = await coll.updateMany(
 
 const unsetResult = await coll.updateMany({ status: { $exists: true } }, { $unset: { status: "" } });
 
+const skillUploadedResult = await coll.updateMany(
+  {
+    skillMarkdown: { $exists: true, $type: "string", $nin: ["", null] },
+  },
+  { $set: { skillFileUploaded: true } }
+);
+
 console.log(`Set catalogType on ${typeResult.modifiedCount} document(s).`);
 console.log(`Removed status from ${unsetResult.modifiedCount} document(s).`);
+console.log(`Set skillFileUploaded on ${skillUploadedResult.modifiedCount} document(s) with skillMarkdown.`);
 
 await mongoose.disconnect();

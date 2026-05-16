@@ -23,6 +23,11 @@ export async function getAgents(): Promise<Agent[]> {
   return parseResponse<Agent[]>(response);
 }
 
+export async function getAgent(agentId: string): Promise<Agent> {
+  const response = await fetch(`${API_BASE_URL}/api/agents/${agentId}`);
+  return parseResponse<Agent>(response);
+}
+
 export async function createAgent(input: AgentInput, userEmail: string): Promise<Agent> {
   const response = await fetch(`${API_BASE_URL}/api/agents`, {
     method: "POST",

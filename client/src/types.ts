@@ -30,6 +30,8 @@ export interface Agent {
   ownerEmail: string;
   hostedUrl: string;
   docsUrl?: string;
+  skillMarkdown?: string;
+  skillFileUploaded?: boolean;
   featured: boolean;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +60,8 @@ export interface AgentInput {
   hostedUrl: string;
   docsUrl: string;
   featured: boolean;
+  skillMarkdown: string;
+  skillSourceFileName: string;
 }
 
 export interface AgentRequestInput {

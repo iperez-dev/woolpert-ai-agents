@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createAgent, createRequest, deleteAgent, getAgents, getRequests, updateAgent } from "./api";
+import { createAgent, createRequest, deleteAgent, getAgent, getAgents, getRequests, updateAgent } from "./api";
 import {
   AGENT_DEPARTMENTS,
   CATALOG_TYPE_LABELS,
@@ -62,7 +62,7 @@ function formatCardDate(iso: string): string {
   return `${d.getMonth() + 1}.${d.getDate()}.${d.getFullYear()}`;
 }
 
-type AgentCardAction = "launch" | "docs" | "edit" | "delete";
+type AgentCardAction = "launch" | "docs" | "edit" | "delete" | "skill_download";
 
 const emptyAgentForm: AgentInput = {
   catalogType: "ai_agent",
@@ -75,6 +75,8 @@ const emptyAgentForm: AgentInput = {
   hostedUrl: "",
   docsUrl: "",
   featured: false,
+  skillMarkdown: "",
+  skillSourceFileName: "",
 };
 
 const emptyRequestForm: AgentRequestInput = {
@@ -86,6 +88,7 @@ const emptyRequestForm: AgentRequestInput = {
 };
 
 function App() {
+  const skillFileInputRef = useRef<HTMLInputElement>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [requestCount, setRequestCount] = useState(0);
   const [agentForm, setAgentForm] = useState<AgentInput>(emptyAgentForm);
@@ -174,21 +177,49 @@ function App() {
     setSuccessMessage("");
   }
 
-  function beginEditing(agent: Agent) {
-    setEditingAgentId(agent._id);
-    setAgentForm({
-      catalogType: resolveCatalogType(agent),
-      name: agent.name,
-      summary: agent.summary,
-      department: agent.department,
-      tags: agent.tags.join(", "),
-      ownerName: agent.ownerName,
-      ownerEmail: agent.ownerEmail,
-      hostedUrl: agent.hostedUrl,
-      docsUrl: agent.docsUrl || "",
-      featured: agent.featured,
-    });
+  async function applySkillMarkdownFile(file: File) {
+    if (!file.name.toLowerCase().endsWith(".md")) {
+      setErrorMessage("Only .md Claude skill files are accepted.");
+      return;
+    }
+    try {
+      const text = await file.text();
+      setAgentForm((prev) => ({
+        ...prev,
+        skillMarkdown: text,
+        skillSourceFileName: file.name,
+      }));
+      resetMessages();
+    } catch {
+      setErrorMessage("Could not read the skill file.");
+    }
+  }
+
+  async function beginEditing(agent: Agent) {
+    setBusy(true);
     resetMessages();
+    try {
+      const full = await getAgent(agent._id);
+      setEditingAgentId(full._id);
+      setAgentForm({
+        catalogType: resolveCatalogType(full),
+        name: full.name,
+        summary: full.summary,
+        department: full.department,
+        tags: full.tags.join(", "),
+        ownerName: full.ownerName,
+        ownerEmail: full.ownerEmail,
+        hostedUrl: full.hostedUrl,
+        docsUrl: full.docsUrl || "",
+        featured: full.featured,
+        skillMarkdown: full.skillMarkdown ?? "",
+        skillSourceFileName: "",
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load agent for editing.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function cancelEditing() {
@@ -207,6 +238,11 @@ function App() {
     resetMessages();
 
     try {
+      if (agentForm.catalogType === "claude_skill" && !agentForm.skillMarkdown.trim()) {
+        setErrorMessage("Claude Skill catalog items require a SKILL.md file with valid YAML frontmatter.");
+        return;
+      }
+
       const authEmail = agentForm.ownerEmail.trim();
       if (editingAgentId) {
         await updateAgent(editingAgentId, agentForm, authEmail);
@@ -253,11 +289,43 @@ function App() {
       return;
     }
     if (action === "edit") {
-      beginEditing(agent);
+      void beginEditing(agent);
       return;
     }
     if (action === "delete") {
       void performDelete(agent._id);
+      return;
+    }
+    if (action === "skill_download") {
+      void downloadSkillMarkdown(agent);
+    }
+  }
+
+  async function downloadSkillMarkdown(agent: Agent) {
+    try {
+      const full = await getAgent(agent._id);
+      const md = full.skillMarkdown;
+      if (!md?.trim()) {
+        setErrorMessage("No skill file is stored for this catalog item.");
+        return;
+      }
+      const base =
+        agent.name
+          .trim()
+          .replace(/[/\\?%*:|"<>]/g, "_")
+          .slice(0, 120) || "SKILL";
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${base}.md`;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not download skill file.");
     }
   }
 
@@ -402,6 +470,15 @@ function App() {
                   <button type="button" className="agent-card__action" onClick={() => openActionGate(agent, "edit")}>
                     Edit
                   </button>
+                  {resolveCatalogType(agent) === "claude_skill" && agent.skillFileUploaded ? (
+                    <button
+                      type="button"
+                      className="agent-card__action"
+                      onClick={() => openActionGate(agent, "skill_download")}
+                    >
+                      Download SKILL.md
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="agent-card__action"
@@ -433,6 +510,9 @@ function App() {
                 setAgentForm((prev) => ({
                   ...prev,
                   catalogType: event.target.value as AgentCatalogType,
+                  ...(event.target.value === "ai_agent"
+                    ? { skillMarkdown: "", skillSourceFileName: "" }
+                    : {}),
                 }))
               }
             >
@@ -510,6 +590,63 @@ function App() {
               }
             />
           </label>
+
+          {agentForm.catalogType === "claude_skill" ? (
+            <div className="skill-dropzone-wrap">
+              <span className="skill-dropzone-label">Claude skill file (.md)</span>
+              <div
+                className="skill-dropzone"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const file = event.dataTransfer.files[0];
+                  if (file) {
+                    void applySkillMarkdownFile(file);
+                  }
+                }}
+                onClick={() => skillFileInputRef.current?.click()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    skillFileInputRef.current?.click();
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <p className="skill-dropzone__lead">Drop SKILL.md here or click to browse</p>
+                <p className="skill-dropzone__hint">
+                  File must start with YAML frontmatter between --- lines and include name and description
+                  keys.
+                </p>
+              </div>
+              <input
+                ref={skillFileInputRef}
+                type="file"
+                accept=".md,text/markdown"
+                className="skill-dropzone__input"
+                aria-label="Choose Claude skill markdown file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    void applySkillMarkdownFile(file);
+                  }
+                  event.target.value = "";
+                }}
+              />
+              <p className="skill-dropzone__status">
+                {agentForm.skillSourceFileName
+                  ? `Attached: ${agentForm.skillSourceFileName}`
+                  : agentForm.skillMarkdown.trim()
+                    ? "Saved skill file on server — drop or browse to replace."
+                    : "No skill file selected yet."}
+              </p>
+            </div>
+          ) : null}
+
           <label>
             Hosted URL
             <input

@@ -10,7 +10,7 @@ app.use(
     origin: process.env.CLIENT_URL || "*",
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
