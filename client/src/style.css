@@ -81,7 +81,7 @@ a {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1px;
   margin: 0;
   border: 1px solid #2a2a2a;
@@ -128,7 +128,35 @@ a {
   margin-top: 28px;
 }
 
-.agents h2,
+.agents__search {
+  margin-bottom: 40px;
+}
+
+.agents__search-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #dedede;
+  max-width: 420px;
+}
+
+.agents__search input {
+  border: 1px solid #353535;
+  background: #111;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+
+.agents__empty {
+  margin: 0;
+  padding: 24px 16px;
+  border: 1px dashed #383838;
+  color: #b4b4b4;
+  text-align: center;
+}
+
 .panel h2 {
   margin: 0 0 16px;
   text-transform: uppercase;
@@ -138,7 +166,7 @@ a {
 
 .agent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 14px;
 }
 
@@ -148,51 +176,78 @@ a {
   padding: 16px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.agent-card__meta {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
 }
 
 .agent-card__dept {
   margin: 0;
+  font-size: 14px;
+  font-weight: 600;
   color: #f28e41;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 12px;
+  text-align: left;
 }
 
-.agent-card h3 {
-  margin: 2px 0 0;
+.agent-card__date {
+  margin: 0;
+  font-size: 13px;
+  color: #9a9a9a;
+  white-space: nowrap;
+}
+
+.agent-card__title {
+  margin: 0;
   font-size: 1.3rem;
+  line-height: 1.25;
 }
 
-.agent-card__summary,
-.agent-card__owner {
+.agent-card__summary {
   margin: 0;
   color: #cbcbcb;
   font-size: 14px;
+}
+
+.agent-card__creator {
+  margin: 0;
+  color: #888;
+  font-size: 12px;
 }
 
 .agent-card__tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  justify-content: flex-start;
+  align-items: center;
 }
 
-.agent-card__tags span {
+.agent-card__tag {
   border: 1px solid #383838;
   padding: 2px 8px;
   font-size: 12px;
   color: #ddd;
 }
 
-.agent-card footer {
+.agent-card__tag--catalog {
+  border-color: #f08a3e;
+  color: #f08a3e;
+}
+
+.agent-card__footer {
   margin-top: auto;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.agent-card footer a,
-.agent-card footer button {
+.agent-card__action {
   border: 1px solid #444;
   background: #111;
   color: #fff;
@@ -201,9 +256,83 @@ a {
   cursor: pointer;
 }
 
-.agent-card footer .danger {
-  border-color: #8f2d35;
+.action-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.action-gate__dialog {
+  width: min(400px, 100%);
+  border: 1px solid #3a3a3a;
+  background: #0c0c0c;
+  padding: 20px 22px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.action-gate__dialog h3 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.action-gate__hint {
+  margin: 0 0 14px;
+  color: #b8b8b8;
+  font-size: 14px;
+}
+
+.action-gate__label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #e8e8e8;
+}
+
+.action-gate__label input {
+  border: 1px solid #353535;
+  background: #111;
+  color: #fff;
+  padding: 10px 11px;
+  font-size: 15px;
+}
+
+.action-gate__error {
+  margin: 10px 0 0;
   color: #ff9ca6;
+  font-size: 13px;
+}
+
+.action-gate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.action-gate__confirm {
+  border: 1px solid #f08a3e;
+  background: #d16f28;
+  color: #fff;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.action-gate__cancel {
+  border: 1px solid #4a4a4a;
+  background: #151515;
+  color: #ddd;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .forms {
@@ -278,6 +407,12 @@ a {
 .panel button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 880px) {

@@ -1,7 +1,13 @@
 import mongoose from "mongoose";
+import { AGENT_DEPARTMENTS, CATALOG_TYPES } from "../constants/agentCatalog.js";
 
 const agentSchema = new mongoose.Schema(
   {
+    catalogType: {
+      type: String,
+      enum: CATALOG_TYPES,
+      default: "ai_agent",
+    },
     name: {
       type: String,
       required: true,
@@ -18,7 +24,7 @@ const agentSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      maxlength: 100,
+      enum: AGENT_DEPARTMENTS,
     },
     tags: {
       type: [String],
@@ -45,11 +51,6 @@ const agentSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
-    },
-    status: {
-      type: String,
-      enum: ["active", "pilot", "deprecated"],
-      default: "active",
     },
     featured: {
       type: Boolean,

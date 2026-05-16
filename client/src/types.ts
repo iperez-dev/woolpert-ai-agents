@@ -1,8 +1,27 @@
-export type AgentStatus = "active" | "pilot" | "deprecated";
+export type AgentCatalogType = "ai_agent" | "claude_skill";
+
+export const AGENT_DEPARTMENTS = [
+  "Buildings",
+  "Geospatial",
+  "Infrastructure",
+  "Growth",
+  "Human Resources",
+  "Finance and Legal",
+  "IT",
+] as const;
+
+export type AgentDepartment = (typeof AGENT_DEPARTMENTS)[number];
+
+export const CATALOG_TYPE_LABELS: Record<AgentCatalogType, string> = {
+  ai_agent: "AI Agent",
+  claude_skill: "Claude Skill",
+};
+
 export type RequestPriority = "low" | "medium" | "high";
 
 export interface Agent {
   _id: string;
+  catalogType?: AgentCatalogType;
   name: string;
   summary: string;
   department: string;
@@ -11,7 +30,6 @@ export interface Agent {
   ownerEmail: string;
   hostedUrl: string;
   docsUrl?: string;
-  status: AgentStatus;
   featured: boolean;
   createdAt: string;
   updatedAt: string;
@@ -30,6 +48,7 @@ export interface AgentRequest {
 }
 
 export interface AgentInput {
+  catalogType: AgentCatalogType;
   name: string;
   summary: string;
   department: string;
@@ -38,7 +57,6 @@ export interface AgentInput {
   ownerEmail: string;
   hostedUrl: string;
   docsUrl: string;
-  status: AgentStatus;
   featured: boolean;
 }
 

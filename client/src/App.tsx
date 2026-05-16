@@ -1,9 +1,71 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { createAgent, createRequest, deleteAgent, getAgents, getRequests, updateAgent } from "./api";
-import type { Agent, AgentInput, AgentRequestInput } from "./types";
+import {
+  AGENT_DEPARTMENTS,
+  CATALOG_TYPE_LABELS,
+  type Agent,
+  type AgentCatalogType,
+  type AgentDepartment,
+  type AgentInput,
+  type AgentRequestInput,
+} from "./types";
+
+const SEARCH_STOPWORDS = new Set(["agent", "agents", "the", "a", "an"]);
+
+function parseSearchTokens(raw: string): string[] {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) {
+    return [];
+  }
+  return trimmed
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0 && !SEARCH_STOPWORDS.has(t));
+}
+
+function tagMatchesAnyToken(tag: string, tokens: string[]): boolean {
+  const tagNorm = tag.toLowerCase();
+  return tokens.some((tok) => tagNorm.includes(tok) || tok.includes(tagNorm));
+}
+
+function getSearchableTagStrings(agent: Agent): string[] {
+  const kind = resolveCatalogType(agent);
+  const label = CATALOG_TYPE_LABELS[kind];
+  const slugSpaced = kind.replace(/_/g, " ");
+  const extras =
+    kind === "ai_agent"
+      ? ["AI Agents", "ai agents"]
+      : kind === "claude_skill"
+        ? ["Claude Skills", "claude skills"]
+        : [];
+  return [...agent.tags, label, kind, slugSpaced, ...extras];
+}
+
+function agentMatchesSearch(agent: Agent, tokens: string[]): boolean {
+  if (tokens.length === 0) {
+    return true;
+  }
+  return getSearchableTagStrings(agent).some((tag) => tagMatchesAnyToken(tag, tokens));
+}
+
+function resolveCatalogType(agent: Agent): AgentCatalogType {
+  return agent.catalogType ?? "ai_agent";
+}
+
+/** Display date as M.D.YYYY (e.g. 5.16.2026) */
+function formatCardDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+  return `${d.getMonth() + 1}.${d.getDate()}.${d.getFullYear()}`;
+}
+
+type AgentCardAction = "launch" | "docs" | "edit" | "delete";
 
 const emptyAgentForm: AgentInput = {
+  catalogType: "ai_agent",
   name: "",
   summary: "",
   department: "",
@@ -12,7 +74,6 @@ const emptyAgentForm: AgentInput = {
   ownerEmail: "",
   hostedUrl: "",
   docsUrl: "",
-  status: "active",
   featured: false,
 };
 
@@ -29,14 +90,31 @@ function App() {
   const [requestCount, setRequestCount] = useState(0);
   const [agentForm, setAgentForm] = useState<AgentInput>(emptyAgentForm);
   const [requestForm, setRequestForm] = useState<AgentRequestInput>(emptyRequestForm);
-  const [uploaderEmail, setUploaderEmail] = useState("");
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [agentSearch, setAgentSearch] = useState("");
+  const [actionGate, setActionGate] = useState<{
+    agent: Agent;
+    action: AgentCardAction;
+  } | null>(null);
+  const [gatePassword, setGatePassword] = useState("");
+  const [gateError, setGateError] = useState("");
 
-  const activeAgentCount = useMemo(
-    () => agents.filter((agent) => agent.status === "active").length,
+  const closeActionGate = useCallback(() => {
+    setActionGate(null);
+    setGatePassword("");
+    setGateError("");
+  }, []);
+
+  const aiAgentCount = useMemo(
+    () => agents.filter((agent) => resolveCatalogType(agent) === "ai_agent").length,
+    [agents]
+  );
+
+  const claudeSkillCount = useMemo(
+    () => agents.filter((agent) => resolveCatalogType(agent) === "claude_skill").length,
     [agents]
   );
 
@@ -44,6 +122,14 @@ function App() {
     () => agents.filter((agent) => agent.featured).length,
     [agents]
   );
+
+  const filteredAgents = useMemo(() => {
+    const tokens = parseSearchTokens(agentSearch);
+    if (tokens.length === 0) {
+      return agents;
+    }
+    return agents.filter((agent) => agentMatchesSearch(agent, tokens));
+  }, [agents, agentSearch]);
 
   useEffect(() => {
     async function loadData() {
@@ -59,6 +145,30 @@ function App() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (!actionGate) {
+      return;
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeActionGate();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [actionGate, closeActionGate]);
+
+  useEffect(() => {
+    if (!actionGate) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [actionGate]);
+
   function resetMessages() {
     setErrorMessage("");
     setSuccessMessage("");
@@ -67,6 +177,7 @@ function App() {
   function beginEditing(agent: Agent) {
     setEditingAgentId(agent._id);
     setAgentForm({
+      catalogType: resolveCatalogType(agent),
       name: agent.name,
       summary: agent.summary,
       department: agent.department,
@@ -75,7 +186,6 @@ function App() {
       ownerEmail: agent.ownerEmail,
       hostedUrl: agent.hostedUrl,
       docsUrl: agent.docsUrl || "",
-      status: agent.status,
       featured: agent.featured,
     });
     resetMessages();
@@ -97,11 +207,12 @@ function App() {
     resetMessages();
 
     try {
+      const authEmail = agentForm.ownerEmail.trim();
       if (editingAgentId) {
-        await updateAgent(editingAgentId, agentForm, uploaderEmail);
+        await updateAgent(editingAgentId, agentForm, authEmail);
         setSuccessMessage("Agent updated successfully.");
       } else {
-        await createAgent(agentForm, uploaderEmail);
+        await createAgent(agentForm, authEmail);
         setSuccessMessage("Agent uploaded successfully.");
       }
 
@@ -114,16 +225,49 @@ function App() {
     }
   }
 
-  async function handleDelete(agentId: string) {
-    if (!window.confirm("Delete this agent from the repository?")) {
+  function openActionGate(agent: Agent, action: AgentCardAction) {
+    setActionGate({ agent, action });
+    setGatePassword("");
+    setGateError("");
+  }
+
+  function confirmActionGate() {
+    if (!actionGate) {
+      return;
+    }
+    const expected = actionGate.agent.name.trim();
+    if (gatePassword.trim() !== expected) {
+      setGateError("Incorrect password. Try again, or contact the developer team if you need access.");
       return;
     }
 
+    const { agent, action } = actionGate;
+    closeActionGate();
+
+    if (action === "launch") {
+      window.open(agent.hostedUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (action === "docs" && agent.docsUrl) {
+      window.open(agent.docsUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (action === "edit") {
+      beginEditing(agent);
+      return;
+    }
+    if (action === "delete") {
+      void performDelete(agent._id);
+    }
+  }
+
+  async function performDelete(agentId: string) {
     setBusy(true);
     resetMessages();
 
     try {
-      await deleteAgent(agentId, uploaderEmail);
+      const agent = agents.find((a) => a._id === agentId);
+      await deleteAgent(agentId, (agent?.ownerEmail ?? "").trim());
       await refreshAgents();
       setSuccessMessage("Agent removed.");
       if (editingAgentId === agentId) {
@@ -174,8 +318,12 @@ function App() {
           <p>Total Agents</p>
         </article>
         <article>
-          <h2>{activeAgentCount}</h2>
-          <p>Active Agents</p>
+          <h2>{aiAgentCount}</h2>
+          <p>AI Agents</p>
+        </article>
+        <article>
+          <h2>{claudeSkillCount}</h2>
+          <p>Claude Skills</p>
         </article>
         <article>
           <h2>{featuredAgentCount}</h2>
@@ -194,59 +342,123 @@ function App() {
       )}
 
       <section className="agents">
-        <h2>Available AI Agents</h2>
-        <div className="agent-grid">
-          {agents.map((agent) => (
-            <article key={agent._id} className="agent-card">
-              <header>
-                <p className="agent-card__dept">{agent.department}</p>
-                <h3>{agent.name}</h3>
-              </header>
-              <p className="agent-card__summary">{agent.summary}</p>
-              <p className="agent-card__owner">
-                Owner: {agent.ownerName} ({agent.ownerEmail})
-              </p>
-              <div className="agent-card__tags">
-                {agent.tags.map((tag) => (
-                  <span key={`${agent._id}-${tag}`}>{tag}</span>
-                ))}
-              </div>
-              <footer>
-                <a href={agent.hostedUrl} target="_blank" rel="noreferrer">
-                  Launch Agent
-                </a>
-                {agent.docsUrl ? (
-                  <a href={agent.docsUrl} target="_blank" rel="noreferrer">
-                    Documentation
-                  </a>
-                ) : null}
-                <button type="button" onClick={() => beginEditing(agent)}>
-                  Edit
-                </button>
-                <button type="button" className="danger" onClick={() => handleDelete(agent._id)}>
-                  Delete
-                </button>
-              </footer>
-            </article>
-          ))}
+        <div className="agents__search">
+          <label htmlFor="agent-search" className="agents__search-label">
+            Search by tag keyword
+            <input
+              id="agent-search"
+              type="search"
+              value={agentSearch}
+              onChange={(event) => setAgentSearch(event.target.value)}
+              placeholder="e.g. scraping, AI Agent, Claude Skill"
+              autoComplete="off"
+            />
+          </label>
         </div>
+        {filteredAgents.length === 0 && agentSearch.trim() !== "" ? (
+          <p className="agents__empty">No agents match your search.</p>
+        ) : (
+          <div className="agent-grid">
+            {filteredAgents.map((agent) => (
+              <article key={agent._id} className="agent-card">
+                <header className="agent-card__meta">
+                  <span className="agent-card__dept">{agent.department}</span>
+                  <time className="agent-card__date" dateTime={agent.createdAt}>
+                    {formatCardDate(agent.createdAt)}
+                  </time>
+                </header>
+                <h3 className="agent-card__title">{agent.name.trim()}</h3>
+                <p className="agent-card__summary">{agent.summary}</p>
+                <div className="agent-card__tags" aria-label="Tags">
+                  <span className="agent-card__tag agent-card__tag--catalog">
+                    {CATALOG_TYPE_LABELS[resolveCatalogType(agent)]}
+                  </span>
+                  {agent.tags.map((tag) => (
+                    <span key={`${agent._id}-${tag}`} className="agent-card__tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <p className="agent-card__creator">
+                  Creator: {agent.ownerName} ({agent.ownerEmail})
+                </p>
+                <footer className="agent-card__footer">
+                  <button
+                    type="button"
+                    className="agent-card__action"
+                    onClick={() => openActionGate(agent, "launch")}
+                  >
+                    Launch Agent
+                  </button>
+                  {agent.docsUrl ? (
+                    <button
+                      type="button"
+                      className="agent-card__action"
+                      onClick={() => openActionGate(agent, "docs")}
+                    >
+                      Documentation
+                    </button>
+                  ) : null}
+                  <button type="button" className="agent-card__action" onClick={() => openActionGate(agent, "edit")}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-card__action"
+                    onClick={() => openActionGate(agent, "delete")}
+                  >
+                    Delete
+                  </button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="forms">
         <form className="panel" onSubmit={handleAgentSubmit}>
           <h2>{editingAgentId ? "Update Existing Agent" : "Upload New Agent"}</h2>
           <p className="panel__hint">
-            Allowed users only. Use your Woolpert email listed in the backend allow list.
+            Allowed users only. Creator email must be your Woolpert address listed in the backend allow
+            list — it is used to authorize uploads and edits.
           </p>
 
           <label>
-            Uploader email
+            Catalog item type
+            <select
+              required
+              value={agentForm.catalogType}
+              onChange={(event) =>
+                setAgentForm((prev) => ({
+                  ...prev,
+                  catalogType: event.target.value as AgentCatalogType,
+                }))
+              }
+            >
+              <option value="ai_agent">{CATALOG_TYPE_LABELS.ai_agent}</option>
+              <option value="claude_skill">{CATALOG_TYPE_LABELS.claude_skill}</option>
+            </select>
+          </label>
+          <label>
+            Creator name
+            <input
+              required
+              value={agentForm.ownerName}
+              onChange={(event) =>
+                setAgentForm((prev) => ({ ...prev, ownerName: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            Creator email
             <input
               required
               type="email"
-              value={uploaderEmail}
-              onChange={(event) => setUploaderEmail(event.target.value)}
-              placeholder="name@woolpert.com"
+              value={agentForm.ownerEmail}
+              onChange={(event) =>
+                setAgentForm((prev) => ({ ...prev, ownerEmail: event.target.value }))
+              }
             />
           </label>
           <label>
@@ -258,24 +470,27 @@ function App() {
             />
           </label>
           <label>
-            Summary
-            <textarea
-              required
-              value={agentForm.summary}
-              onChange={(event) =>
-                setAgentForm((prev) => ({ ...prev, summary: event.target.value }))
-              }
-            />
-          </label>
-          <label>
-            Department
-            <input
+            Agent department
+            <select
               required
               value={agentForm.department}
               onChange={(event) =>
                 setAgentForm((prev) => ({ ...prev, department: event.target.value }))
               }
-            />
+            >
+              <option value="" disabled>
+                Select department
+              </option>
+              {AGENT_DEPARTMENTS.map((dept) => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+              {agentForm.department !== "" &&
+              !AGENT_DEPARTMENTS.includes(agentForm.department as AgentDepartment) ? (
+                <option value={agentForm.department}>{agentForm.department} (legacy)</option>
+              ) : null}
+            </select>
           </label>
           <label>
             Tags (comma separated)
@@ -286,23 +501,12 @@ function App() {
             />
           </label>
           <label>
-            Owner name
-            <input
+            Description
+            <textarea
               required
-              value={agentForm.ownerName}
+              value={agentForm.summary}
               onChange={(event) =>
-                setAgentForm((prev) => ({ ...prev, ownerName: event.target.value }))
-              }
-            />
-          </label>
-          <label>
-            Owner email
-            <input
-              required
-              type="email"
-              value={agentForm.ownerEmail}
-              onChange={(event) =>
-                setAgentForm((prev) => ({ ...prev, ownerEmail: event.target.value }))
+                setAgentForm((prev) => ({ ...prev, summary: event.target.value }))
               }
             />
           </label>
@@ -326,22 +530,6 @@ function App() {
               onChange={(event) => setAgentForm((prev) => ({ ...prev, docsUrl: event.target.value }))}
               placeholder="https://..."
             />
-          </label>
-          <label>
-            Status
-            <select
-              value={agentForm.status}
-              onChange={(event) =>
-                setAgentForm((prev) => ({
-                  ...prev,
-                  status: event.target.value as AgentInput["status"],
-                }))
-              }
-            >
-              <option value="active">Active</option>
-              <option value="pilot">Pilot</option>
-              <option value="deprecated">Deprecated</option>
-            </select>
           </label>
           <label className="checkbox">
             <input
@@ -435,6 +623,58 @@ function App() {
           </div>
         </form>
       </section>
+
+      {actionGate ? (
+        <div
+          className="action-gate"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeActionGate();
+            }
+          }}
+        >
+          <div
+            className="action-gate__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="action-gate-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h3 id="action-gate-title">Password required</h3>
+            <p className="action-gate__hint">
+              Enter the password to access this agent. If you need credentials, contact the developer team.
+            </p>
+            <label className="action-gate__label">
+              Password
+              <input
+                autoComplete="off"
+                type="text"
+                value={gatePassword}
+                onChange={(event) => {
+                  setGatePassword(event.target.value);
+                  setGateError("");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    confirmActionGate();
+                  }
+                }}
+              />
+            </label>
+            {gateError ? <p className="action-gate__error">{gateError}</p> : null}
+            <div className="action-gate__actions">
+              <button type="button" className="action-gate__confirm" onClick={confirmActionGate}>
+                Continue
+              </button>
+              <button type="button" className="action-gate__cancel" onClick={closeActionGate}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
