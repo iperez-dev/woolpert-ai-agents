@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path . -Recurse -Include *.pptx,*.pdf,*.docx,*.ppt -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\ivanw\\\\OneDrive\\\\Desktop\\\\ai-agents\" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch \"node_modules|\\\\.git\" } | Select-Object -ExpandProperty FullName | Select-Object -First 100)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\ivanw\\\\OneDrive\\\\Desktop\\\\ai-agents\" -Force -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch \"node_modules|\\\\.git\" } | Select-Object Name, Extension, FullName | Where-Object { $null -eq $_.Extension -or $_.Extension -notmatch \"js|json|tsx|ts|css|html|svg\" } | Select-Object -ExpandProperty FullName)",
+      "Bash(cmd /c type \"woolpert-agents.txt\")"
+    ]
+  }
+}

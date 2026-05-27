@@ -893,7 +893,7 @@ function App() {
               required
               value={requestForm.name}
               onChange={(event) => setRequestForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Automated Scope Writer"
+              placeholder="RFPs Dashboard"
             />
           </label>
           <label>
@@ -934,7 +934,7 @@ function App() {
               onChange={(event) =>
                 setRequestForm((prev) => ({ ...prev, problem: event.target.value }))
               }
-              placeholder="Data centres contain hundreds of service penetrations through fire-rated walls. Each must be individually evaluated before a certified firestopping product can be selected. Coordination between MEP consultants, architects, and structural engineers is manual, fragmented, and error-prone."
+              placeholder="The practice receives RFPs and other opportunities across multiple portals and there is no single place to track them. Opportunities are being missed because they are discovered too late to respond competitively."
             />
           </label>
           <label>
@@ -945,7 +945,7 @@ function App() {
               onChange={(event) =>
                 setRequestForm((prev) => ({ ...prev, currentSolutions: event.target.value }))
               }
-              placeholder="The practice produces a library of standard firestopping details for common scenarios, issued at RIBA Stage 4 as the contractor's primary reference. The practice cannot anticipate every condition. Unusual service groupings, tight clearances, or atypical wall constructions are discovered too late."
+              placeholder="Opportunities are tracked through multiple individual government and private platforms."
             />
           </label>
           <label>
@@ -956,7 +956,7 @@ function App() {
               onChange={(event) =>
                 setRequestForm((prev) => ({ ...prev, businessCase: event.target.value }))
               }
-              placeholder="Firestopping is often a scope creep item. Tricky to coordinate due to 10s or 100s of scenarios — each requiring a certified detail for the penetration."
+              placeholder="Time saved: Eliminates duplicated, fragmented portal monitoring across the team. One shared source of truth replaces individual effort. Better strategic decisions: Full pipeline visibility lets leadership make deliberate choices about where to focus BD effort — by sector, client type, and volume."
             />
           </label>
           <label>
@@ -967,7 +967,7 @@ function App() {
               onChange={(event) =>
                 setRequestForm((prev) => ({ ...prev, successCriteria: event.target.value }))
               }
-              placeholder="A pilot project deployment on an active data centre with high MEP-to-fire-wall density. The plugin replaces the standard typical details package with a fully coordinated elevation set, complete with compliance data and steelwork schedules."
+              placeholder="A 60-day pilot with the BD team and two directors. All incoming opportunities logged regardless of source. Success: zero opportunities discovered too late, and at least one pursuit directly enabled by the dashboard's visibility."
             />
           </label>
           <label>
