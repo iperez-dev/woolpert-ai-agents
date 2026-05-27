@@ -21,4 +21,27 @@ router.post("/", async (req, res, next) => {
   }
 });
 
+router.put("/:id", async (req, res, next) => {
+  try {
+    const updated = await AgentRequest.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!updated) return res.status(404).json({ message: "Request not found." });
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const deleted = await AgentRequest.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: "Request not found." });
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

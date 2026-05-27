@@ -83,11 +83,24 @@ export async function getRequests(): Promise<AgentRequest[]> {
 export async function createRequest(input: AgentRequestInput): Promise<AgentRequest> {
   const response = await fetch(`${API_BASE_URL}/api/requests`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-
   return parseResponse<AgentRequest>(response);
+}
+
+export async function updateRequest(requestId: string, input: AgentRequestInput): Promise<AgentRequest> {
+  const response = await fetch(`${API_BASE_URL}/api/requests/${requestId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return parseResponse<AgentRequest>(response);
+}
+
+export async function deleteRequest(requestId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/requests/${requestId}`, {
+    method: "DELETE",
+  });
+  return parseResponse<void>(response);
 }

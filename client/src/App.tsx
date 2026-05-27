@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createAgent, createRequest, deleteAgent, getAgent, getAgents, getRequests, updateAgent } from "./api";
+import { createAgent, createRequest, deleteAgent, deleteRequest, getAgent, getAgents, getRequests, updateAgent, updateRequest } from "./api";
 import {
   AGENT_DEPARTMENTS,
   CATALOG_TYPE_LABELS,
+  REQUEST_PROJECT_TYPE_LABELS,
   type Agent,
   type AgentCatalogType,
   type AgentDepartment,
   type AgentInput,
+  type AgentRequest,
   type AgentRequestInput,
+  type RequestPriority,
+  type RequestProjectType,
 } from "./types";
+
+type CatalogFilter = "ai_agent" | "claude_skill" | "design_system" | "requested";
 
 const SEARCH_STOPWORDS = new Set(["agent", "agents", "the", "a", "an"]);
 
@@ -38,7 +44,9 @@ function getSearchableTagStrings(agent: Agent): string[] {
       ? ["AI Agents", "ai agents"]
       : kind === "claude_skill"
         ? ["Claude Skills", "claude skills", "Claude skill"]
-        : [];
+        : kind === "design_system"
+          ? ["Design Systems", "design systems", "Design system"]
+          : [];
   return [...agent.tags, label, kind, slugSpaced, ...extras];
 }
 
@@ -72,7 +80,7 @@ function resolveCatalogType(agent: Agent): AgentCatalogType {
 }
 
 function catalogThumbnailTypeLabel(agent: Agent): string {
-  return resolveCatalogType(agent) === "claude_skill" ? "Claude skill" : "AI Agent";
+  return CATALOG_TYPE_LABELS[resolveCatalogType(agent)];
 }
 
 /** Display date as M.D.YYYY (e.g. 5.16.2026) */
@@ -103,8 +111,13 @@ const emptyAgentForm: AgentInput = {
 };
 
 const emptyRequestForm: AgentRequestInput = {
-  title: "",
-  businessNeed: "",
+  name: "",
+  department: "",
+  projectType: "",
+  problem: "",
+  currentSolutions: "",
+  businessCase: "",
+  successCriteria: "",
   requestedBy: "",
   requesterEmail: "",
   priority: "medium",
@@ -113,7 +126,8 @@ const emptyRequestForm: AgentRequestInput = {
 function App() {
   const skillFileInputRef = useRef<HTMLInputElement>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [requestCount, setRequestCount] = useState(0);
+  const [requests, setRequests] = useState<AgentRequest[]>([]);
+  const [activeFilter, setActiveFilter] = useState<CatalogFilter>("ai_agent");
   const [agentForm, setAgentForm] = useState<AgentInput>(emptyAgentForm);
   const [requestForm, setRequestForm] = useState<AgentRequestInput>(emptyRequestForm);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -127,6 +141,9 @@ function App() {
   } | null>(null);
   const [gatePassword, setGatePassword] = useState("");
   const [gateError, setGateError] = useState("");
+  const [requestDetail, setRequestDetail] = useState<AgentRequest | null>(null);
+  const [requestDetailEditing, setRequestDetailEditing] = useState(false);
+  const [requestDetailForm, setRequestDetailForm] = useState<AgentRequestInput>(emptyRequestForm);
 
   const closeActionGate = useCallback(() => {
     setActionGate(null);
@@ -144,25 +161,37 @@ function App() {
     [agents]
   );
 
-  const featuredAgentCount = useMemo(
-    () => agents.filter((agent) => agent.featured).length,
+  const designSystemCount = useMemo(
+    () => agents.filter((agent) => resolveCatalogType(agent) === "design_system").length,
     [agents]
   );
 
   const filteredAgents = useMemo(() => {
+    if (activeFilter === "requested") return [];
+    const pool = agents.filter((a) => resolveCatalogType(a) === activeFilter);
     const tokens = parseSearchTokens(agentSearch);
-    if (tokens.length === 0) {
-      return agents;
-    }
-    return agents.filter((agent) => agentMatchesSearch(agent, tokens));
-  }, [agents, agentSearch]);
+    if (tokens.length === 0) return pool;
+    return pool.filter((agent) => agentMatchesSearch(agent, tokens));
+  }, [agents, agentSearch, activeFilter]);
+
+  const filteredRequests = useMemo(() => {
+    if (activeFilter !== "requested") return [];
+    const tokens = parseSearchTokens(agentSearch);
+    if (tokens.length === 0) return requests;
+    return requests.filter((req) => {
+      const text = [req.name, req.department, req.projectType, req.problem, req.requestedBy, req.priority, req.status]
+        .join(" ")
+        .toLowerCase();
+      return tokens.some((tok) => text.includes(tok));
+    });
+  }, [requests, agentSearch, activeFilter]);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [agentList, requests] = await Promise.all([getAgents(), getRequests()]);
+        const [agentList, requestList] = await Promise.all([getAgents(), getRequests()]);
         setAgents(agentList);
-        setRequestCount(requests.length);
+        setRequests(requestList);
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not load data.");
       }
@@ -398,12 +427,69 @@ function App() {
 
     try {
       await createRequest(requestForm);
-      const requests = await getRequests();
-      setRequestCount(requests.length);
+      const updatedRequests = await getRequests();
+      setRequests(updatedRequests);
       setRequestForm(emptyRequestForm);
       setSuccessMessage("Request submitted. Thank you.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to submit request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openRequestDetail(req: AgentRequest) {
+    setRequestDetail(req);
+    setRequestDetailEditing(false);
+    setRequestDetailForm({
+      name: req.name,
+      department: req.department,
+      projectType: req.projectType,
+      problem: req.problem,
+      currentSolutions: req.currentSolutions,
+      businessCase: req.businessCase,
+      successCriteria: req.successCriteria,
+      requestedBy: req.requestedBy,
+      requesterEmail: req.requesterEmail,
+      priority: req.priority,
+    });
+  }
+
+  function closeRequestDetail() {
+    setRequestDetail(null);
+    setRequestDetailEditing(false);
+  }
+
+  async function handleRequestUpdate(event: FormEvent) {
+    event.preventDefault();
+    if (!requestDetail) return;
+    setBusy(true);
+    resetMessages();
+    try {
+      await updateRequest(requestDetail._id, requestDetailForm);
+      const updated = await getRequests();
+      setRequests(updated);
+      closeRequestDetail();
+      setSuccessMessage("Request updated.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to update request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRequestDelete() {
+    if (!requestDetail) return;
+    setBusy(true);
+    resetMessages();
+    try {
+      await deleteRequest(requestDetail._id);
+      const updated = await getRequests();
+      setRequests(updated);
+      closeRequestDetail();
+      setSuccessMessage("Request deleted.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to delete request.");
     } finally {
       setBusy(false);
     }
@@ -424,24 +510,44 @@ function App() {
       </section>
 
       <section className="metrics">
-        <article>
-          <h2>{agents.length}</h2>
-          <p>Total Agents</p>
-        </article>
-        <article>
+        <article
+          className={activeFilter === "ai_agent" ? "metrics__tab--active" : ""}
+          onClick={() => setActiveFilter("ai_agent")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && setActiveFilter("ai_agent")}
+        >
           <h2>{aiAgentCount}</h2>
           <p>AI Agents</p>
         </article>
-        <article>
+        <article
+          className={activeFilter === "claude_skill" ? "metrics__tab--active" : ""}
+          onClick={() => setActiveFilter("claude_skill")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && setActiveFilter("claude_skill")}
+        >
           <h2>{claudeSkillCount}</h2>
           <p>Claude Skills</p>
         </article>
-        <article>
-          <h2>{featuredAgentCount}</h2>
-          <p>Featured Agents</p>
+        <article
+          className={activeFilter === "design_system" ? "metrics__tab--active" : ""}
+          onClick={() => setActiveFilter("design_system")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && setActiveFilter("design_system")}
+        >
+          <h2>{designSystemCount}</h2>
+          <p>Design Systems</p>
         </article>
-        <article>
-          <h2>{requestCount}</h2>
+        <article
+          className={activeFilter === "requested" ? "metrics__tab--active" : ""}
+          onClick={() => setActiveFilter("requested")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && setActiveFilter("requested")}
+        >
+          <h2>{requests.length}</h2>
           <p>Requested Agents</p>
         </article>
       </section>
@@ -455,18 +561,51 @@ function App() {
       <section className="agents">
         <div className="agents__search">
           <label htmlFor="agent-search" className="agents__search-label">
-            Search by tag keyword
+            {activeFilter === "requested" ? "Search requested agents" : "Search by tag keyword"}
             <input
               id="agent-search"
               type="search"
               value={agentSearch}
               onChange={(event) => setAgentSearch(event.target.value)}
-              placeholder="e.g. scraping, AI Agent, Claude Skill"
+              placeholder={activeFilter === "requested" ? "e.g. automation, high priority" : "e.g. scraping, AI Agent, Claude Skill"}
               autoComplete="off"
             />
           </label>
         </div>
-        {filteredAgents.length === 0 && agentSearch.trim() !== "" ? (
+
+        {activeFilter === "requested" ? (
+          filteredRequests.length === 0 && agentSearch.trim() !== "" ? (
+            <p className="agents__empty">No requests match your search.</p>
+          ) : filteredRequests.length === 0 ? (
+            <p className="agents__empty">No agent requests yet.</p>
+          ) : (
+            <div className="agent-grid">
+              {filteredRequests.map((req) => (
+                <article key={req._id} className="agent-card agent-card--clickable" onClick={() => openRequestDetail(req)}>
+                  <header className="agent-card__meta">
+                    <span className={`agent-card__tag agent-card__tag--priority-${req.priority}`}>
+                      {req.priority.charAt(0).toUpperCase() + req.priority.slice(1)} Priority
+                    </span>
+                    <time className="agent-card__date" dateTime={req.createdAt}>
+                      {formatCardDate(req.createdAt)}
+                    </time>
+                  </header>
+                  <h3 className="agent-card__title">{req.name}</h3>
+                  <p className="agent-card__summary">{req.problem}</p>
+                  <div className="agent-card__tags" aria-label="Tags">
+                    <span className="agent-card__tag agent-card__tag--dept">{req.department}</span>
+                    <span className={`agent-card__tag agent-card__tag--catalog-${req.projectType === "ai_agent" ? "ai" : req.projectType === "claude_skill" ? "claude" : "plugin"}`}>
+                      {REQUEST_PROJECT_TYPE_LABELS[req.projectType]}
+                    </span>
+                  </div>
+                  <p className="agent-card__creator">
+                    Requested by: {req.requestedBy} ({req.requesterEmail})
+                  </p>
+                </article>
+              ))}
+            </div>
+          )
+        ) : filteredAgents.length === 0 && agentSearch.trim() !== "" ? (
           <p className="agents__empty">No agents match your search.</p>
         ) : (
           <div className="agent-grid">
@@ -485,7 +624,9 @@ function App() {
                     className={
                       resolveCatalogType(agent) === "claude_skill"
                         ? "agent-card__tag agent-card__tag--catalog-claude"
-                        : "agent-card__tag agent-card__tag--catalog-ai"
+                        : resolveCatalogType(agent) === "design_system"
+                          ? "agent-card__tag agent-card__tag--catalog-design"
+                          : "agent-card__tag agent-card__tag--catalog-ai"
                     }
                   >
                     {catalogThumbnailTypeLabel(agent)}
@@ -559,7 +700,7 @@ function App() {
                 setAgentForm((prev) => ({
                   ...prev,
                   catalogType: event.target.value as AgentCatalogType,
-                  ...(event.target.value === "ai_agent"
+                  ...(event.target.value !== "claude_skill"
                     ? { skillMarkdown: "", skillZipBase64: "", skillSourceFileName: "" }
                     : {}),
                 }))
@@ -567,6 +708,7 @@ function App() {
             >
               <option value="ai_agent">{CATALOG_TYPE_LABELS.ai_agent}</option>
               <option value="claude_skill">{CATALOG_TYPE_LABELS.claude_skill}</option>
+              <option value="design_system">{CATALOG_TYPE_LABELS.design_system}</option>
             </select>
           </label>
           <label>
@@ -746,22 +888,86 @@ function App() {
             Missing something from the catalog? Submit a request so the team can prioritize it.
           </p>
           <label>
-            Agent request title
+            Name
             <input
               required
-              value={requestForm.title}
-              onChange={(event) => setRequestForm((prev) => ({ ...prev, title: event.target.value }))}
+              value={requestForm.name}
+              onChange={(event) => setRequestForm((prev) => ({ ...prev, name: event.target.value }))}
               placeholder="Automated Scope Writer"
             />
           </label>
           <label>
-            Business need
+            Department
+            <select
+              required
+              value={requestForm.department}
+              onChange={(event) =>
+                setRequestForm((prev) => ({ ...prev, department: event.target.value as AgentDepartment }))
+              }
+            >
+              <option value="" disabled>Select a department</option>
+              {AGENT_DEPARTMENTS.map((dept) => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Project type
+            <select
+              required
+              value={requestForm.projectType}
+              onChange={(event) =>
+                setRequestForm((prev) => ({ ...prev, projectType: event.target.value as RequestProjectType }))
+              }
+            >
+              <option value="" disabled>Select a project type</option>
+              {(Object.entries(REQUEST_PROJECT_TYPE_LABELS) as [RequestProjectType, string][]).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Problem
             <textarea
               required
-              value={requestForm.businessNeed}
+              value={requestForm.problem}
               onChange={(event) =>
-                setRequestForm((prev) => ({ ...prev, businessNeed: event.target.value }))
+                setRequestForm((prev) => ({ ...prev, problem: event.target.value }))
               }
+              placeholder="Data centres contain hundreds of service penetrations through fire-rated walls. Each must be individually evaluated before a certified firestopping product can be selected. Coordination between MEP consultants, architects, and structural engineers is manual, fragmented, and error-prone."
+            />
+          </label>
+          <label>
+            Current solutions
+            <textarea
+              required
+              value={requestForm.currentSolutions}
+              onChange={(event) =>
+                setRequestForm((prev) => ({ ...prev, currentSolutions: event.target.value }))
+              }
+              placeholder="The practice produces a library of standard firestopping details for common scenarios, issued at RIBA Stage 4 as the contractor's primary reference. The practice cannot anticipate every condition. Unusual service groupings, tight clearances, or atypical wall constructions are discovered too late."
+            />
+          </label>
+          <label>
+            Business case
+            <textarea
+              required
+              value={requestForm.businessCase}
+              onChange={(event) =>
+                setRequestForm((prev) => ({ ...prev, businessCase: event.target.value }))
+              }
+              placeholder="Firestopping is often a scope creep item. Tricky to coordinate due to 10s or 100s of scenarios — each requiring a certified detail for the penetration."
+            />
+          </label>
+          <label>
+            Success criteria
+            <textarea
+              required
+              value={requestForm.successCriteria}
+              onChange={(event) =>
+                setRequestForm((prev) => ({ ...prev, successCriteria: event.target.value }))
+              }
+              placeholder="A pilot project deployment on an active data centre with high MEP-to-fire-wall density. The plugin replaces the standard typical details package with a fully coordinated elevation set, complete with compliance data and steelwork schedules."
             />
           </label>
           <label>
@@ -809,6 +1015,181 @@ function App() {
           </div>
         </form>
       </section>
+
+      {requestDetail ? (
+        <div
+          className="req-detail"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeRequestDetail();
+          }}
+        >
+          <div
+            className="req-detail__dialog"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {requestDetailEditing ? (
+              <form onSubmit={handleRequestUpdate}>
+                <div className="req-detail__header">
+                  <h3 className="req-detail__title">Edit Request</h3>
+                  <button type="button" className="req-detail__close" onClick={closeRequestDetail}>Close</button>
+                </div>
+                <div className="req-detail__fields">
+                  <label>
+                    Name
+                    <input
+                      required
+                      value={requestDetailForm.name}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, name: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Department
+                    <select
+                      required
+                      value={requestDetailForm.department}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, department: e.target.value as AgentDepartment }))}
+                    >
+                      <option value="" disabled>Select a department</option>
+                      {AGENT_DEPARTMENTS.map((dept) => (
+                        <option key={dept} value={dept}>{dept}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Project type
+                    <select
+                      required
+                      value={requestDetailForm.projectType}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, projectType: e.target.value as RequestProjectType }))}
+                    >
+                      <option value="" disabled>Select a project type</option>
+                      {(Object.entries(REQUEST_PROJECT_TYPE_LABELS) as [RequestProjectType, string][]).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Problem
+                    <textarea
+                      required
+                      value={requestDetailForm.problem}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, problem: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Current solutions
+                    <textarea
+                      required
+                      value={requestDetailForm.currentSolutions}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, currentSolutions: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Business case
+                    <textarea
+                      required
+                      value={requestDetailForm.businessCase}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, businessCase: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Success criteria
+                    <textarea
+                      required
+                      value={requestDetailForm.successCriteria}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, successCriteria: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Requested by
+                    <input
+                      required
+                      value={requestDetailForm.requestedBy}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, requestedBy: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Requester email
+                    <input
+                      required
+                      type="email"
+                      value={requestDetailForm.requesterEmail}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, requesterEmail: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Priority
+                    <select
+                      value={requestDetailForm.priority}
+                      onChange={(e) => setRequestDetailForm((p) => ({ ...p, priority: e.target.value as RequestPriority }))}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="req-detail__actions">
+                  <button type="submit" className="req-detail__save-btn" disabled={busy}>Save</button>
+                  <button type="button" className="req-detail__cancel-btn" onClick={() => setRequestDetailEditing(false)}>Cancel</button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="req-detail__header">
+                  <h3 className="req-detail__title">{requestDetail.name}</h3>
+                  <button type="button" className="req-detail__close" onClick={closeRequestDetail}>Close</button>
+                </div>
+                <div className="req-detail__tags">
+                  <span className="agent-card__tag agent-card__tag--dept">{requestDetail.department}</span>
+                  <span className={`agent-card__tag agent-card__tag--catalog-${requestDetail.projectType === "ai_agent" ? "ai" : requestDetail.projectType === "claude_skill" ? "claude" : "plugin"}`}>
+                    {REQUEST_PROJECT_TYPE_LABELS[requestDetail.projectType]}
+                  </span>
+                  <span className={`agent-card__tag agent-card__tag--priority-${requestDetail.priority}`}>
+                    {requestDetail.priority.charAt(0).toUpperCase() + requestDetail.priority.slice(1)} Priority
+                  </span>
+                  <span className={`agent-card__tag agent-card__tag--status-${requestDetail.status}`}>
+                    {requestDetail.status.charAt(0).toUpperCase() + requestDetail.status.slice(1)}
+                  </span>
+                </div>
+                <hr className="req-detail__divider" />
+                <div className="req-detail__section">
+                  <span className="req-detail__label">Problem</span>
+                  <p className="req-detail__value">{requestDetail.problem}</p>
+                </div>
+                <div className="req-detail__section">
+                  <span className="req-detail__label">Current solutions</span>
+                  <p className="req-detail__value">{requestDetail.currentSolutions}</p>
+                </div>
+                <div className="req-detail__section">
+                  <span className="req-detail__label">Business case</span>
+                  <p className="req-detail__value">{requestDetail.businessCase}</p>
+                </div>
+                <div className="req-detail__section">
+                  <span className="req-detail__label">Success criteria</span>
+                  <p className="req-detail__value">{requestDetail.successCriteria}</p>
+                </div>
+                <hr className="req-detail__divider" />
+                <div className="req-detail__section">
+                  <span className="req-detail__label">Requested by</span>
+                  <p className="req-detail__value">{requestDetail.requestedBy} — {requestDetail.requesterEmail}</p>
+                </div>
+                <div className="req-detail__section">
+                  <span className="req-detail__label">Submitted</span>
+                  <p className="req-detail__value">{formatCardDate(requestDetail.createdAt)}</p>
+                </div>
+                <div className="req-detail__actions">
+                  <button type="button" className="req-detail__edit-btn" onClick={() => setRequestDetailEditing(true)}>Edit</button>
+                  <button type="button" className="req-detail__delete-btn" onClick={handleRequestDelete} disabled={busy}>Delete</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {actionGate ? (
         <div

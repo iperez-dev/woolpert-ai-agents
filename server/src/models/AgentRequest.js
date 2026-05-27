@@ -2,17 +2,45 @@ import mongoose from "mongoose";
 
 const agentRequestSchema = new mongoose.Schema(
   {
-    title: {
+    name: {
       type: String,
       required: true,
       trim: true,
       maxlength: 120,
     },
-    businessNeed: {
+    department: {
+      type: String,
+      required: true,
+      enum: ["Buildings", "Geospatial", "Infrastructure", "Growth", "Human Resources", "Finance and Legal", "IT"],
+    },
+    projectType: {
+      type: String,
+      required: true,
+      enum: ["ai_agent", "claude_skill", "plugin"],
+    },
+    problem: {
       type: String,
       required: true,
       trim: true,
-      maxlength: 1200,
+      maxlength: 2000,
+    },
+    currentSolutions: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 2000,
+    },
+    businessCase: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 2000,
+    },
+    successCriteria: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 2000,
     },
     requestedBy: {
       type: String,

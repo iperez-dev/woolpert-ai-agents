@@ -1,4 +1,4 @@
-export type AgentCatalogType = "ai_agent" | "claude_skill";
+export type AgentCatalogType = "ai_agent" | "claude_skill" | "design_system";
 
 export const AGENT_DEPARTMENTS = [
   "Buildings",
@@ -15,9 +15,18 @@ export type AgentDepartment = (typeof AGENT_DEPARTMENTS)[number];
 export const CATALOG_TYPE_LABELS: Record<AgentCatalogType, string> = {
   ai_agent: "AI Agent",
   claude_skill: "Claude Skill",
+  design_system: "Design System",
 };
 
 export type RequestPriority = "low" | "medium" | "high";
+
+export type RequestProjectType = "ai_agent" | "claude_skill" | "plugin";
+
+export const REQUEST_PROJECT_TYPE_LABELS: Record<RequestProjectType, string> = {
+  ai_agent: "AI Agent",
+  claude_skill: "Claude Skill",
+  plugin: "Plugin",
+};
 
 export interface Agent {
   _id: string;
@@ -39,8 +48,13 @@ export interface Agent {
 
 export interface AgentRequest {
   _id: string;
-  title: string;
-  businessNeed: string;
+  name: string;
+  department: AgentDepartment;
+  projectType: RequestProjectType;
+  problem: string;
+  currentSolutions: string;
+  businessCase: string;
+  successCriteria: string;
   requestedBy: string;
   requesterEmail: string;
   priority: RequestPriority;
@@ -66,8 +80,13 @@ export interface AgentInput {
 }
 
 export interface AgentRequestInput {
-  title: string;
-  businessNeed: string;
+  name: string;
+  department: AgentDepartment | "";
+  projectType: RequestProjectType | "";
+  problem: string;
+  currentSolutions: string;
+  businessCase: string;
+  successCriteria: string;
   requestedBy: string;
   requesterEmail: string;
   priority: RequestPriority;
